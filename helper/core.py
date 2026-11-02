@@ -113,10 +113,11 @@ def export_bundles(items: list[dict], image_dir: Path, output: Path, max_bytes=M
                 raise ValueError('Недопустимое имя фото.')
             if not (image_dir / Path(ref).name).is_file():
                 raise ValueError(f'Фото отсутствует: {ref}')
+        total_item_size = sum((image_dir / Path(ref).name).stat().st_size for ref in set(refs))
         extra = sum((image_dir / Path(ref).name).stat().st_size for ref in set(refs) - used)
-        if extra > max_bytes:
+        if total_item_size > max_bytes:
             raise ValueError(f'Слишком много фото у объявления {item["avito_id"]}.')
-        if current and size + extra > max_bytes:
+        if current and (size + extra > max_bytes or len(current) >= 5000):
             groups.append(current)
             current, used, size = [], set(), 0
             extra = sum((image_dir / Path(ref).name).stat().st_size for ref in set(refs))

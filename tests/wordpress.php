@@ -2,7 +2,7 @@
 function gg_check($ok, $message) { if (!$ok) { throw new RuntimeException($message); } }
 wp_set_current_user(1);
 GG_Avito_Plugin::types();
-GG_Avito_Plugin::routes();
+rest_get_server();
 GG_Avito_Plugin::demo(null);
 GG_Avito_Plugin::demo(null);
 $req = new WP_REST_Request('GET'); $req['page'] = 1;
@@ -17,12 +17,12 @@ $request = new WP_REST_Request('POST'); $request['id'] = $item['id']; $request['
 $result = GG_Avito_Plugin::publish($request);
 $product = wc_get_product($result['product_id']);
 gg_check($product->get_status() === 'draft', 'Product published without explicit action');
-gg_check((float) $product->get_regular_price() === (float) $item['price'] * 1.1, 'Markup calculation failed');
+gg_check(abs((float) $product->get_regular_price() - (float) $item['price'] * 1.1) < 0.001, 'Markup calculation failed');
 $product->set_name('Manual website title'); $product->save();
 GG_Avito_Plugin::publish($request);
 $product = wc_get_product($result['product_id']);
 gg_check($product->get_name() === 'Manual website title', 'Manual title overwritten');
-gg_check((float) $product->get_regular_price() === (float) $item['price'] * 1.1, 'Markup compounded on update');
+gg_check(abs((float) $product->get_regular_price() - (float) $item['price'] * 1.1) < 0.001, 'Markup compounded on update');
 $request['status'] = 'publish'; GG_Avito_Plugin::publish($request);
 $request['status'] = 'draft'; GG_Avito_Plugin::publish($request);
 gg_check(get_post_status($result['product_id']) === 'publish', 'Published product demoted by draft action');
@@ -39,6 +39,34 @@ $done = GG_Avito_Plugin::step($step);
 gg_check($done['done'] && !$done['errors'], 'Import job failed');
 gg_check(get_post_meta($job_id, '_gg_job', true)['skipped'] === 1, 'Existing item not skipped');
 unlink($path);
+$photo_path = tempnam(sys_get_temp_dir(), 'gg-photo-test');
+$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7XcAAAAASUVORK5CYII=');
+$photo_items = [
+    GG_Avito_Bundle::normalize(['avito_id' => 'photo-test-003', 'title' => 'Photo test', 'price' => '100', 'images' => ['images/pixel.png']]),
+    GG_Avito_Bundle::normalize(['avito_id' => 'photo-test-004', 'title' => 'Retry test', 'price' => '200', 'images' => ['images/missing.png']]),
+];
+$z = new ZipArchive(); $z->open($photo_path, ZipArchive::OVERWRITE);
+$z->addFromString('products.json', wp_json_encode(['version' => 1, 'items' => $photo_items]));
+$z->addFromString('images/pixel.png', $png); $z->close();
+$photo_job = wp_insert_post(['post_type' => 'gg_avito_job', 'post_status' => 'private', 'post_title' => 'Photo test job']);
+update_post_meta($photo_job, '_gg_job', wp_slash(['path' => $photo_path, 'extension' => 'zip', 'items' => $photo_items, 'pending' => [0, 1], 'processed' => 0, 'errors' => [], 'skipped' => 0, 'replace' => false]));
+$photo_step = new WP_REST_Request('POST'); $photo_step['id'] = $photo_job;
+$first = GG_Avito_Plugin::step($photo_step);
+gg_check(!$first['done'] && !$first['errors'], 'Photo import failed: ' . wp_json_encode($first['errors']));
+$second = GG_Avito_Plugin::step($photo_step);
+gg_check($second['done'] && count($second['errors']) === 1, 'Missing photo did not produce retryable error');
+$z->open($photo_path); $z->addFromString('images/missing.png', $png); $z->close();
+GG_Avito_Plugin::retry($photo_step);
+$retried = GG_Avito_Plugin::step($photo_step);
+gg_check($retried['done'] && !$retried['errors'], 'Retry failed');
+$attachments = get_posts(['post_type' => 'attachment', 'post_status' => 'inherit', 'fields' => 'ids', 'meta_key' => '_gg_image_hash', 'meta_value' => hash('sha256', $png), 'numberposts' => -1]);
+gg_check(count($attachments) === 1, 'Identical images were duplicated');
+unlink($photo_path);
+$manager = wp_insert_user(['user_login' => 'gg-test-manager', 'user_pass' => 'local-test-only', 'role' => 'shop_manager']);
+gg_check(!is_wp_error($manager), 'Could not create test manager');
+wp_set_current_user($manager);
+gg_check(current_user_can('manage_woocommerce'), 'Shop manager lost access');
+gg_check(GG_Avito_Plugin::items($req)['total'] === 4, 'Shop manager cannot see private preparation records');
 wp_set_current_user(0);
 $response = rest_do_request(new WP_REST_Request('GET', '/avito-gg/v1/state'));
 gg_check(in_array($response->get_status(), [401, 403], true), 'Anonymous user can access admin data');

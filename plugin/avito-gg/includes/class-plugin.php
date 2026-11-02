@@ -17,7 +17,7 @@ final class GG_Avito_Plugin {
     }
     public static function types(): void {
         foreach (['gg_avito_item', 'gg_avito_job'] as $type) {
-            register_post_type($type, ['public' => false, 'show_ui' => false, 'rewrite' => false, 'supports' => ['title'], 'can_export' => false]);
+            register_post_type($type, ['public' => false, 'show_ui' => false, 'rewrite' => false, 'supports' => ['title'], 'can_export' => false, 'capability_type' => ['product', 'products'], 'map_meta_cap' => true]);
         }
     }
     public static function menu(): void {
@@ -258,6 +258,7 @@ final class GG_Avito_Plugin {
         return ['ok' => true];
     }
     public static function export($r): array {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
         $ids = array_values(array_unique(array_map('absint', (array) $r->get_param('ids'))));
         if (!$ids || count($ids) > 200) { throw new RuntimeException('Выберите от 1 до 200 позиций для одного экспорта.'); }
         $format = $r->get_param('format') === 'csv' ? 'csv' : 'zip';
