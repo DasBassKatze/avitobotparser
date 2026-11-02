@@ -1,0 +1,2 @@
+avito_id,title,description,price,category,url,images,attributes
+sample-001,Тестовый товар,Описание товара,1500,Мебель,,,"{""Состояние"":""Новое""}"

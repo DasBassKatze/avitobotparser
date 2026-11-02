@@ -1,0 +1,58 @@
+name: Checks and plugin package
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: zip, mbstring
+      - run: find plugin -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: node --check plugin/avito-gg/assets/admin.js
+      - run: python -m unittest discover -s tests -v
+      - run: php tests/bundle.php
+      - run: python scripts/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avito-gg-wordpress-plugin
+          path: dist/avito-gg.zip
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: wordpress
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -ptestpass"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mysqli, zip, mbstring, gd
+          tools: wp-cli
+      - name: Install disposable WordPress and WooCommerce
+        run: |
+          mkdir /tmp/gg-wp
+          wp core download --path=/tmp/gg-wp
+          wp config create --path=/tmp/gg-wp --dbname=wordpress --dbuser=root --dbpass=testpass --dbhost=127.0.0.1:3306
+          wp core install --path=/tmp/gg-wp --url=http://localhost:8080 --title=Test --admin_user=admin --admin_password=local-test-password --admin_email=test@example.com --skip-email
+          wp plugin install woocommerce --activate --path=/tmp/gg-wp
+          cp -r plugin/avito-gg /tmp/gg-wp/wp-content/plugins/
+          wp plugin activate avito-gg --path=/tmp/gg-wp
+      - name: Check product lifecycle and permissions
+        run: wp eval-file "$GITHUB_WORKSPACE/tests/wordpress.php" --path=/tmp/gg-wp
